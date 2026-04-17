@@ -35,19 +35,26 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 
 # --- Helper Functions ---
 def send_sms(to, message):
+    """Send an SMS, splitting long messages into 160-char chunks (max 3 texts)."""
     url = "https://voip.ms/api/v1/rest.php"
-    params = {
-        "api_username": VOIPMS_USERNAME,
-        "api_password": VOIPMS_PASSWORD,
-        "method": "sendSMS",
-        "did": DID,
-        "dst": to,
-        "message": message[:160]
-    }
-    response = requests.get(url, params=params)
-    result = response.json()
-    print(f"send_sms result: {result}")
-    return result
+    # Split into chunks of 160 chars max, send at most 3
+    chunks = []
+    while message and len(chunks) < 3:
+        chunks.append(message[:160])
+        message = message[160:]
+    for chunk in chunks:
+        params = {
+            "api_username": VOIPMS_USERNAME,
+            "api_password": VOIPMS_PASSWORD,
+            "method": "sendSMS",
+            "did": DID,
+            "dst": to,
+            "message": chunk
+        }
+        response = requests.get(url, params=params)
+        result = response.json()
+        print(f"send_sms result: {result}")
+    return result if chunks else None
 
 def ask_groq(message):
     if not GROQ_API_KEY:
@@ -66,8 +73,9 @@ def ask_groq(message):
         return "Error processing your request via Groq. Check logs."
 
 def send_to_openclaw(message, sender_number):
+    """Send message to OpenClaw via /v1/agent/run (shares main agent session + memory)."""
     print(f"Attempting to send message to OpenClaw: {message}")
-    target_url = f"{OPENCLAW_GATEWAY_URL}/v1/chat/completions"
+    target_url = f"{OPENCLAW_GATEWAY_URL}/v1/agent/run"
 
     if not OPENCLAW_GATEWAY_TOKEN:
         print("OPENCLAW_GATEWAY_TOKEN not configured. Cannot send to OpenClaw.")
@@ -78,19 +86,18 @@ def send_to_openclaw(message, sender_number):
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "openclaw/default",
-        "messages": [
-            {"role": "system", "content": "You are a helpful assistant responding via SMS. Keep responses concise and under 160 characters when possible."},
-            {"role": "user", "content": message}
-        ],
-        "user": f"voipms-{sender_number}"
+        "message": f"[SMS from {sender_number}] {message}\n\n(Respond in 1-2 short sentences max. This is SMS — keep it under 300 characters total.)",
+        "sessionKey": "main"
     }
 
     try:
-        response = requests.post(target_url, headers=headers, json=payload, timeout=60)
+        response = requests.post(target_url, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         response_data = response.json()
-        openclaw_reply = response_data.get("choices", [{}])[0].get("message", {}).get("content", "No reply from OpenClaw.")
+        openclaw_reply = response_data.get("response", "No reply from OpenClaw.")
+        # Truncate to 480 chars (3 SMS max) to prevent text floods
+        if len(openclaw_reply) > 480:
+            openclaw_reply = openclaw_reply[:477] + "..."
         print(f"Received reply from OpenClaw: {openclaw_reply}")
         return openclaw_reply
     except requests.exceptions.Timeout:
@@ -99,7 +106,7 @@ def send_to_openclaw(message, sender_number):
     except requests.exceptions.RequestException as e:
         print(f"Error sending to OpenClaw: {e}")
         return f"OpenClaw communication error. ({e})"
-    except (json.JSONDecodeError, IndexError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError) as e:
         print(f"OpenClaw response parse error: {e} — raw: {response.text}")
         return "OpenClaw sent an unreadable response."
 
