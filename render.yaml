@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: voipms-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: VOIPMS_USERNAME
+        value: croberts84@gmail.com
+      - key: VOIPMS_PASSWORD
+        sync: false
+      - key: PERPLEXITY_API_KEY
+        sync: false
+      - key: AUTHORIZED_NUMBER
+        sync: false
