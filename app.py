@@ -1,20 +1,21 @@
+import time
 import os
 import re
 import requests
 import json
-from datetime import datetime
-from groq import Groq
+from datetime import datetimerom1 groq import Groq
 from flask import Flask, request
 
 app = Flask(__name__)
 
 # --- Configuration from Environment Variables ---
+
 # VoIP.ms Credentials
 VOIPMS_USERNAME = os.environ.get("VOIPMS_USERNAME", "croberts84@gmail.com")
 VOIPMS_PASSWORD = os.environ.get("VOIPMS_PASSWORD")
 
 # OpenClaw Configuration
-OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "https://api.openclaw.ai")
+OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "https://api.openclaw.ai") # Default to public OpenClaw API if not set
 OPENCLAW_GATEWAY_TOKEN = os.environ.get("OPENCLAW_GATEWAY_TOKEN")
 
 # AI API Keys (Groq is now secondary/fallback if OpenClaw fails or is not configured)
@@ -285,7 +286,7 @@ def receive_sms():
     elif msg_lower.startswith("remind me "):
         reminder_text = msg[10:].strip()
         due_date = parse_due_date(reminder_text)
-        task_name = re.sub(r'\b(at|on|by)\b.*$', '', reminder_text, flags=re.IGNORECASE).strip()
+        task_name = re.sub(r'^\b(at|on|by)\b.*$', '', reminder_text, flags=re.IGNORECASE).strip()
         if not task_name:
             task_name = reminder_text
         add_reminder(task_name, due_date)
@@ -298,6 +299,28 @@ def receive_sms():
             reply = "Notion Reminders:\n" + "\n".join(items[:5])
         else:
             reply = "No Notion reminders found."
+
+    # Command: "sexy" mode - Turn TV Room Lamp red at 100%
+    elif msg_lower == "sexy":
+        light_name = "TV Room Lamp"
+        # Turn on the light
+        openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --on", clean_from)
+        if openclaw_reply and "Error" in openclaw_reply:
+            print(f"Error turning on {light_name}: {openclaw_reply}")
+        time.sleep(1) # Small delay
+
+        # Set brightness to 100%
+        openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --brightness 100", clean_from)
+        if openclaw_reply and "Error" in openclaw_reply:
+            print(f"Error setting brightness for {light_name}: {openclaw_reply}")
+        time.sleep(1) # Small delay
+
+        # Set color to red
+        openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --color red", clean_from)
+        if openclaw_reply and "Error" in openclaw_reply:
+            print(f"Error setting color for {light_name}: {openclaw_reply}")
+
+        reply = "TV Room Lamp set to sexy red!"
 
     else:
         openclaw_reply = send_to_openclaw(msg, clean_from)
