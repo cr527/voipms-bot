@@ -7,13 +7,12 @@ app = Flask(__name__)
 
 VOIPMS_USERNAME = os.environ.get("VOIPMS_USERNAME", "croberts84@gmail.com")
 VOIPMS_PASSWORD = os.environ.get("VOIPMS_PASSWORD")
-PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 AUTHORIZED_NUMBER = os.environ.get("AUTHORIZED_NUMBER")
 DID = "9728664569"
 
 client = OpenAI(
-    api_key=PERPLEXITY_API_KEY,
-    base_url="https://api.perplexity.ai"
+    api_key=OPENAI_API_KEY
 )
 
 def send_sms(to, message):
@@ -31,7 +30,7 @@ def send_sms(to, message):
 
 def ask_perplexity(message):
     response = client.chat.completions.create(
-        model="sonar",
+        model="gpt-4o-mini",
         messages=[
             {
                 "role": "system",
