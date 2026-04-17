@@ -1,21 +1,17 @@
 import os
 import requests
-import google.generativeai as genai
+from groq import Groq
 from flask import Flask, request
 
 app = Flask(__name__)
 
 VOIPMS_USERNAME = os.environ.get("VOIPMS_USERNAME", "croberts84@gmail.com")
 VOIPMS_PASSWORD = os.environ.get("VOIPMS_PASSWORD")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 AUTHORIZED_NUMBER = os.environ.get("AUTHORIZED_NUMBER")
 DID = "9728664569"
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel(
-    model_name="gemini-2.0-flash",
-    system_instruction="You are a helpful assistant responding via SMS. Keep responses concise and under 160 characters when possible."
-)
+client = Groq(api_key=GROQ_API_KEY)
 
 def send_sms(to, message):
     url = "https://voip.ms/api/v1/rest.php"
@@ -30,9 +26,15 @@ def send_sms(to, message):
     response = requests.get(url, params=params)
     return response.json()
 
-def ask_gemini(message):
-    response = model.generate_content(message)
-    return response.text
+def ask_groq(message):
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant responding via SMS. Keep responses concise and under 160 characters when possible."},
+            {"role": "user", "content": message}
+        ]
+    )
+    return response.choices[0].message.content
 
 @app.route("/sms", methods=["GET", "POST"])
 def receive_sms():
@@ -80,7 +82,7 @@ def receive_sms():
         print(f"UNAUTHORIZED: {clean_from} != {clean_auth}")
         return "Unauthorized", 403
 
-    reply = ask_gemini(message)
+    reply = ask_groq(message)
     print(f"Reply: {reply}")
 
     send_sms(clean_from, reply)
