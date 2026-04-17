@@ -67,7 +67,7 @@ def ask_groq(message):
 
 def send_to_openclaw(message, sender_number):
     print(f"Attempting to send message to OpenClaw: {message}")
-    target_url = f"{OPENCLAW_GATEWAY_URL}/api/sessions/main/messages"
+    target_url = f"{OPENCLAW_GATEWAY_URL}/v1/chat/completions"
 
     if not OPENCLAW_GATEWAY_TOKEN:
         print("OPENCLAW_GATEWAY_TOKEN not configured. Cannot send to OpenClaw.")
@@ -78,14 +78,19 @@ def send_to_openclaw(message, sender_number):
         "Content-Type": "application/json"
     }
     payload = {
-        "message": message
+        "model": "openclaw/default",
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant responding via SMS. Keep responses concise and under 160 characters when possible."},
+            {"role": "user", "content": message}
+        ],
+        "user": f"voipms-{sender_number}"
     }
 
     try:
-        response = requests.post(target_url, headers=headers, json=payload, timeout=30)
+        response = requests.post(target_url, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
         response_data = response.json()
-        openclaw_reply = response_data.get("message", "No reply from OpenClaw.")
+        openclaw_reply = response_data.get("choices", [{}])[0].get("message", {}).get("content", "No reply from OpenClaw.")
         print(f"Received reply from OpenClaw: {openclaw_reply}")
         return openclaw_reply
     except requests.exceptions.Timeout:
@@ -94,8 +99,8 @@ def send_to_openclaw(message, sender_number):
     except requests.exceptions.RequestException as e:
         print(f"Error sending to OpenClaw: {e}")
         return f"OpenClaw communication error. ({e})"
-    except json.JSONDecodeError:
-        print(f"OpenClaw response was not valid JSON: {response.text}")
+    except (json.JSONDecodeError, IndexError, KeyError) as e:
+        print(f"OpenClaw response parse error: {e} — raw: {response.text}")
         return "OpenClaw sent an unreadable response."
 
 def notion_headers():
