@@ -1,17 +1,21 @@
 import os
 import requests
+import google.generativeai as genai
 from flask import Flask, request
-from openai import OpenAI
 
 app = Flask(__name__)
 
 VOIPMS_USERNAME = os.environ.get("VOIPMS_USERNAME", "croberts84@gmail.com")
 VOIPMS_PASSWORD = os.environ.get("VOIPMS_PASSWORD")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 AUTHORIZED_NUMBER = os.environ.get("AUTHORIZED_NUMBER")
 DID = "9728664569"
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel(
+    model_name="gemini-1.5-flash",
+    system_instruction="You are a helpful assistant responding via SMS. Keep responses concise and under 160 characters when possible."
+)
 
 def send_sms(to, message):
     url = "https://voip.ms/api/v1/rest.php"
@@ -26,21 +30,9 @@ def send_sms(to, message):
     response = requests.get(url, params=params)
     return response.json()
 
-def ask_openai(message):
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a helpful assistant responding via SMS. Keep responses concise and under 160 characters when possible."
-            },
-            {
-                "role": "user",
-                "content": message
-            }
-        ]
-    )
-    return response.choices[0].message.content
+def ask_gemini(message):
+    response = model.generate_content(message)
+    return response.text
 
 @app.route("/sms", methods=["GET", "POST"])
 def receive_sms():
@@ -54,7 +46,7 @@ def receive_sms():
     from_number = None
     message = None
 
-    # Try JSON body first (new VoIP.ms webhook format)
+    # Try JSON body first (VoIP.ms webhook format)
     json_data = request.get_json(silent=True)
     if json_data:
         try:
@@ -66,15 +58,9 @@ def receive_sms():
 
     # Fall back to query params / form data
     if not from_number:
-        from_number = (
-            request.args.get("from") or
-            request.form.get("from")
-        )
+        from_number = request.args.get("from") or request.form.get("from")
     if not message:
-        message = (
-            request.args.get("message") or
-            request.form.get("message")
-        )
+        message = request.args.get("message") or request.form.get("message")
 
     print(f"from_number={from_number}, message={message}")
 
@@ -82,10 +68,10 @@ def receive_sms():
         print("ERROR: Missing from_number or message")
         return "Missing params", 400
 
-    # Strip country code if present
-    clean_from = from_number.lstrip("+").replace("1", "", 1).replace("-", "").replace(" ", "")
-    if len(clean_from) > 10:
-        clean_from = clean_from[-10:]
+    # Normalize to 10 digits
+    clean_from = from_number.lstrip("+")
+    if clean_from.startswith("1") and len(clean_from) == 11:
+        clean_from = clean_from[1:]
     clean_auth = AUTHORIZED_NUMBER.replace("-", "").replace(" ", "")[-10:] if AUTHORIZED_NUMBER else ""
 
     print(f"clean_from={clean_from}, clean_auth={clean_auth}")
@@ -94,7 +80,7 @@ def receive_sms():
         print(f"UNAUTHORIZED: {clean_from} != {clean_auth}")
         return "Unauthorized", 403
 
-    reply = ask_openai(message)
+    reply = ask_gemini(message)
     print(f"Reply: {reply}")
 
     send_sms(clean_from, reply)
