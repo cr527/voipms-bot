@@ -14,19 +14,17 @@ VOIPMS_USERNAME = os.environ.get("VOIPMS_USERNAME", "croberts84@gmail.com")
 VOIPMS_PASSWORD = os.environ.get("VOIPMS_PASSWORD")
 
 # OpenClaw Configuration
-OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "https://api.openclaw.ai")  # Default to public OpenClaw API if not set
+OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "https://api.openclaw.ai")
 OPENCLAW_GATEWAY_TOKEN = os.environ.get("OPENCLAW_GATEWAY_TOKEN")
-OPENCLAW_SESSION_KEY = os.environ.get("OPENCLAW_SESSION_KEY", "current")  # This targets the current session (me)
 
 # AI API Keys (Groq is now secondary/fallback if OpenClaw fails or is not configured)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")  # Kept for future use if needed
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")  # Kept for future use if needed
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # Notion Configuration
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
-# Using the newly created database ID
-NOTION_DB_ID = os.environ.get("NOTION_DB_ID", "34529f5f-5ec3-810f-9b93-f3892d6a3665")  # Using the new DB ID
+NOTION_DB_ID = os.environ.get("NOTION_DB_ID", "34529f5f-5ec3-810f-9b93-f3892d6a3665")
 
 # Bot Specifics
 AUTHORIZED_NUMBER = os.environ.get("AUTHORIZED_NUMBER")
@@ -44,7 +42,7 @@ def send_sms(to, message):
         "method": "sendSMS",
         "did": DID,
         "dst": to,
-        "message": message[:160]  # Truncate message to 160 characters for SMS
+        "message": message[:160]
     }
     response = requests.get(url, params=params)
     result = response.json()
@@ -56,7 +54,7 @@ def ask_groq(message):
         return "Groq API key not configured."
     try:
         response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",  # Use a consistent model
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant responding via SMS. Keep responses concise and under 160 characters when possible."},
                 {"role": "user", "content": message}
@@ -69,11 +67,7 @@ def ask_groq(message):
 
 def send_to_openclaw(message, sender_number):
     print(f"Attempting to send message to OpenClaw: {message}")
-    # Default to public API if OPENCLAW_GATEWAY_URL is not explicitly configured
-    if OPENCLAW_GATEWAY_URL == "YOUR_OPENCLAW_GATEWAY_PUBLIC_URL" or not OPENCLAW_GATEWAY_URL:
-        target_url = "https://api.openclaw.ai/api/v1/sessions_send"  # Public OpenClaw API endpoint
-    else:
-        target_url = f"{OPENCLAW_GATEWAY_URL}/api/v1/sessions_send"
+    target_url = f"{OPENCLAW_GATEWAY_URL}/api/sessions/main/messages"
 
     if not OPENCLAW_GATEWAY_TOKEN:
         print("OPENCLAW_GATEWAY_TOKEN not configured. Cannot send to OpenClaw.")
@@ -84,14 +78,12 @@ def send_to_openclaw(message, sender_number):
         "Content-Type": "application/json"
     }
     payload = {
-        "sessionKey": OPENCLAW_SESSION_KEY,
-        "message": message,
-        "label": f"voipms-bot-message-from-{sender_number}"  # Add a label for context
+        "message": message
     }
 
     try:
         response = requests.post(target_url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
+        response.raise_for_status()
         response_data = response.json()
         openclaw_reply = response_data.get("message", "No reply from OpenClaw.")
         print(f"Received reply from OpenClaw: {openclaw_reply}")
@@ -120,7 +112,7 @@ def add_task(task_name):
         "parent": {"database_id": NOTION_DB_ID},
         "properties": {
             "Name": {"title": [{"text": {"content": task_name}}]},
-            "Status": {"select": {"name": "To Check Out"}}  # Default status for new items
+            "Status": {"select": {"name": "To Check Out"}}
         }
     }
     try:
@@ -136,12 +128,12 @@ def add_reminder(task_name, due_date_str):
         return {"error": "Notion not configured."}
     props = {
         "Name": {"title": [{"text": {"content": task_name}}]},
-        "Status": {"select": {"name": "To Check Out"}},  # Default status for new items
-        "Notes": {"rich_text": [{"text": {"content": "Reminder"}}]},  # Label as reminder
-        "Type": {"select": {"name": "Idea"}},  # Default type for reminders
+        "Status": {"select": {"name": "To Check Out"}},
+        "Notes": {"rich_text": [{"text": {"content": "Reminder"}}]},
+        "Type": {"select": {"name": "Idea"}},
     }
     if due_date_str:
-        props["Added"] = {"date": {"start": due_date_str}}  # Use Added for the actual due date
+        props["Added"] = {"date": {"start": due_date_str}}
     data = {"parent": {"database_id": NOTION_DB_ID}, "properties": props}
     try:
         r = requests.post("https://api.notion.com/v1/pages", headers=notion_headers(), json=data)
@@ -159,7 +151,7 @@ def get_reminders():
             "property": "Notes",
             "rich_text": {"contains": "Reminder"}
         },
-        "sorts": [{"property": "Added", "direction": "ascending"}],  # Sort by Added (due date)
+        "sorts": [{"property": "Added", "direction": "ascending"}],
         "page_size": 10
     }
     try:
@@ -173,9 +165,9 @@ def get_reminders():
         reminders = []
         for page in results:
             props = page.get("properties", {})
-            title = props.get("Name", {}).get("title", [])  # Use 'Name' as title property
+            title = props.get("Name", {}).get("title", [])
             name = title[0]["text"]["content"] if title else "Untitled"
-            due = props.get("Added", {}).get("date")  # Use 'Added' as the date property
+            due = props.get("Added", {}).get("date")
             due_str = due["start"] if due else "No date"
             reminders.append(f"{name} ({due_str})")
         return reminders
@@ -213,33 +205,28 @@ def receive_sms():
     from_number = None
     message = None
 
-    # Try to parse JSON first (e.g., from some VoIP.ms webhooks)
     json_data = request.get_json(silent=True)
     if json_data:
         try:
-            # Adjust parsing based on typical VoIP.ms JSON webhook payload (example structure)
-            # This might need to be fine-tuned based on your actual VoIP.ms configuration
             if "data" in json_data and "payload" in json_data["data"]:
                 payload = json_data["data"]["payload"]
                 from_number = payload.get("from", {}).get("phone_number")
                 message = payload.get("text")
-            elif json_data.get("event") == "sms":  # Example for a more generic SMS webhook
+            elif json_data.get("event") == "sms":
                 from_number = json_data.get("from_number")
                 message = json_data.get("message")
-            elif json_data.get("type") == "sms" or json_data.get("type") == "sms_mo":  # More VoIP.ms specific
+            elif json_data.get("type") == "sms" or json_data.get("type") == "sms_mo":
                 from_number = json_data.get("from")
                 message = json_data.get("message")
 
-            # Fallback for simpler JSON if still not found
-            if not from_number and "from" in json_data:  # If 'from' key is at top level
+            if not from_number and "from" in json_data:
                 from_number = json_data.get("from")
-            if not message and "message" in json_data:  # If 'message' key is at top level
+            if not message and "message" in json_data:
                 message = json_data.get("message")
 
         except Exception as e:
             print(f"JSON parse error: {e}")
 
-    # Fallback to form/query parameters if JSON parsing failed or didn't yield results
     if not from_number:
         from_number = request.args.get("from") or request.form.get("from")
     if not message:
@@ -249,11 +236,9 @@ def receive_sms():
         print("Missing 'from' or 'message' parameters in request.")
         return "Missing params", 400
 
-    # Clean and normalize from_number for authorization check
     clean_from = from_number.replace("-", "").replace(" ", "")
     if clean_from.startswith("+"):
         clean_from = clean_from[1:]
-    # Handle common cases like `1` prefix in North American numbers
     if len(clean_from) == 11 and clean_from.startswith("1"):
         clean_from = clean_from[1:]
 
@@ -275,25 +260,21 @@ def receive_sms():
     msg_lower = msg.lower()
     reply = ""
 
-    # Command: add task
     if msg_lower.startswith("add task "):
         task_name = msg[9:].strip()
         add_task(task_name)
         reply = f"Task added to Notion: {task_name}"
 
-    # Command: remind me
     elif msg_lower.startswith("remind me "):
         reminder_text = msg[10:].strip()
         due_date = parse_due_date(reminder_text)
-        # Strip the date portion from the task name heuristics
         task_name = re.sub(r'\b(at|on|by)\b.*$', '', reminder_text, flags=re.IGNORECASE).strip()
         if not task_name:
-            task_name = reminder_text  # Ensure task_name is not empty
+            task_name = reminder_text
         add_reminder(task_name, due_date)
         date_info = f" (due {due_date})" if due_date else ""
         reply = f"Reminder set in Notion: {task_name}{date_info}"
 
-    # Command: reminders
     elif msg_lower in ["reminders", "my reminders", "list reminders"]:
         items = get_reminders()
         if items:
@@ -301,13 +282,11 @@ def receive_sms():
         else:
             reply = "No Notion reminders found."
 
-    # Fallback: Send to OpenClaw
     else:
         openclaw_reply = send_to_openclaw(msg, clean_from)
         if openclaw_reply:
             reply = openclaw_reply
         else:
-            # If OpenClaw fails or is not configured, fall back to Groq if API key is present
             if GROQ_API_KEY:
                 reply = ask_groq(msg)
             else:
@@ -315,7 +294,6 @@ def receive_sms():
 
     print(f"Final Reply: {reply}")
 
-    # Only send SMS if there's a valid reply
     if reply and reply.strip() != "":
         send_sms(clean_from, reply)
     else:
