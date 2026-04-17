@@ -24,7 +24,9 @@ def send_sms(to, message):
         "message": message[:160]
     }
     response = requests.get(url, params=params)
-    return response.json()
+    result = response.json()
+    print(f"send_sms result: {result}")
+    return result
 
 def ask_groq(message):
     response = client.chat.completions.create(
