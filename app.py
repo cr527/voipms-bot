@@ -44,7 +44,6 @@ def ask_openai(message):
 
 @app.route("/sms", methods=["GET", "POST"])
 def receive_sms():
-    # Log everything for debugging
     print("=== INCOMING REQUEST ===")
     print(f"Method: {request.method}")
     print(f"Args: {dict(request.args)}")
@@ -52,19 +51,30 @@ def receive_sms():
     print(f"Data: {request.get_data()}")
     print("========================")
 
-    # Try all possible field name variations VoIP.ms might use
-    from_number = (
-        request.args.get("from") or
-        request.args.get("FROM") or
-        request.form.get("from") or
-        request.form.get("FROM")
-    )
-    message = (
-        request.args.get("message") or
-        request.args.get("MESSAGE") or
-        request.form.get("message") or
-        request.form.get("MESSAGE")
-    )
+    from_number = None
+    message = None
+
+    # Try JSON body first (new VoIP.ms webhook format)
+    json_data = request.get_json(silent=True)
+    if json_data:
+        try:
+            payload = json_data.get("data", {}).get("payload", {})
+            from_number = payload.get("from", {}).get("phone_number")
+            message = payload.get("text")
+        except Exception as e:
+            print(f"JSON parse error: {e}")
+
+    # Fall back to query params / form data
+    if not from_number:
+        from_number = (
+            request.args.get("from") or
+            request.form.get("from")
+        )
+    if not message:
+        message = (
+            request.args.get("message") or
+            request.form.get("message")
+        )
 
     print(f"from_number={from_number}, message={message}")
 
