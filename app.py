@@ -301,27 +301,33 @@ def receive_sms():
         else:
             reply = "No Notion reminders found."
 
-    # Command: "sexy" mode - Turn TV Room Lamp red at 100%
+    # Command: "sexy" mode - Turn TV Room Lamp, Chris' nightstand, and Jana's nightstand red at 100%
     elif msg_lower == "sexy":
-        light_name = "TV Room Lamp"
-        # Turn on the light
-        openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --on", clean_from)
-        if openclaw_reply and "Error" in openclaw_reply:
-            print(f"Error turning on {light_name}: {openclaw_reply}")
-        time.sleep(1) # Small delay
+        lights_to_control = [ "TV Room Lamp", "Chris' nightstand", "Jana's nightstand" ]
+        results = []
+        for light_name in lights_to_control:
+            # Turn on the light
+            openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --on", clean_from)
+            if openclaw_reply and "Error" in openclaw_reply:
+                results.append(f"Error turning on {light_name}: {openclaw_reply}")
+            time.sleep(1) # Small delay
 
-        # Set brightness to 100%
-        openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --brightness 100", clean_from)
-        if openclaw_reply and "Error" in openclaw_reply:
-            print(f"Error setting brightness for {light_name}: {openclaw_reply}")
-        time.sleep(1) # Small delay
+            # Set brightness to 100%
+            openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --brightness 100", clean_from)
+            if openclaw_reply and "Error" in openclaw_reply:
+                results.append(f"Error setting brightness for {light_name}: {openclaw_reply}")
+            time.sleep(1) # Small delay
 
-        # Set color to red
-        openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --color red", clean_from)
-        if openclaw_reply and "Error" in openclaw_reply:
-            print(f"Error setting color for {light_name}: {openclaw_reply}")
-
-        reply = "TV Room Lamp set to sexy red!"
+            # Set color to red
+            openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --color red", clean_from)
+            if openclaw_reply and "Error" in openclaw_reply:
+                results.append(f"Error setting color for {light_name}: {openclaw_reply}")
+            time.sleep(1) # Small delay (after each light is done)
+        
+        if results:
+            reply = "Sexy mode executed with errors: " + "; ".join(results)
+        else:
+            reply = "Sexy mode activated for TV Room Lamp, Chris\' nightstand, and Jana\'s nightstand!"
 
     else:
         openclaw_reply = send_to_openclaw(msg, clean_from)
