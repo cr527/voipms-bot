@@ -359,9 +359,9 @@ def receive_sms():
         light_name = msg[len("get_light_state_internal "):].strip()
         state = get_light_state(light_name, clean_from)
         if state:
-            reply = json.dumps(state) # Return JSON string of light state
+            return json.dumps(state), 200 # Return JSON string of light state directly
         else:
-            reply = "Error getting light state."
+            return "Error getting light state.", 500
 
     print(f"Final Reply: {reply}")
 
