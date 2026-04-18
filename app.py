@@ -1,219 +1,86 @@
-import time
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
-import re
-import requests
-import json
 from datetime import datetime
-from groq import Groq
-from flask import Flask, request
+import time
+import json
+import requests
+
+# --- Environment Variables --- #
+# Render automatically provides environment variables you set.
+# For local development, you might use python-dotenv or set them directly.
+VOIPMS_SMS_DID = os.environ.get('VOIPMS_SMS_DID', 'your_did_here')
+OPENCLAW_GATEWAY_URL = os.environ.get('OPENCLAW_GATEWAY_URL', 'https://api.openclaw.ai') # Default to public API
+OPENCLAW_GATEWAY_TOKEN = os.environ.get('OPENCLAW_GATEWAY_TOKEN', 'your_token_here')
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY', 'your_groq_api_key_here')
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "http://192.168.4.57:8000"}}}) # Enable CORS for your local UI
 
-# --- Configuration from Environment Variables ---
+# --- Helper Functions --- #
+def send_to_openclaw(message_text, token=None, gateway_url=None):
+    # Prioritize provided token and gateway_url, then environment variables
+    final_token = token if token else OPENCLAW_GATEWAY_TOKEN
+    final_gateway_url = gateway_url if gateway_url else OPENCLAW_GATEWAY_URL
 
-# VoIP.ms Credentials
-VOIPMS_USERNAME = os.environ.get("VOIPMS_USERNAME", "croberts84@gmail.com")
-VOIPMS_PASSWORD = os.environ.get("VOIPMS_PASSWORD")
+    if not final_token or not final_gateway_url:
+        print("OpenClaw Gateway URL or Token not set. Cannot send to OpenClaw.")
+        return "Error: OpenClaw not configured."
 
-# OpenClaw Configuration
-OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "https://api.openclaw.ai") # Default to public OpenClaw API if not set
-OPENCLAW_GATEWAY_TOKEN = os.environ.get("OPENCLAW_GATEWAY_TOKEN")
-
-# AI API Keys (Groq is now secondary/fallback if OpenClaw fails or is not configured)
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-# Notion Configuration
-NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
-NOTION_DB_ID = os.environ.get("NOTION_DB_ID", "34529f5f-5ec3-810f-9b93-f3892d6a3665")
-
-# Bot Specifics
-AUTHORIZED_NUMBER = os.environ.get("AUTHORIZED_NUMBER")
-DID = "9728664569"
-
-# --- Initialize Clients ---
-groq_client = Groq(api_key=GROQ_API_KEY)
-
-# --- Helper Functions ---
-def send_sms(to, message):
-    """Send an SMS, splitting long messages into 160-char chunks (max 3 texts)."""
-    url = "https://voip.ms/api/v1/rest.php"
-    chunks = []
-    while message and len(chunks) < 3:
-        chunks.append(message[:160])
-        message = message[160:]
-    result = None
-    for chunk in chunks:
-        params = {
-            "api_username": VOIPMS_USERNAME,
-            "api_password": VOIPMS_PASSWORD,
-            "method": "sendSMS",
-            "did": DID,
-            "dst": to,
-            "message": chunk
-        }
-        response = requests.get(url, params=params)
-        result = response.json()
-        print(f"send_sms result: {result}")
-    return result
-
-def ask_groq(message):
-    if not GROQ_API_KEY:
-        return "Groq API key not configured."
-    try:
-        response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant responding via SMS. Keep responses concise and under 160 characters when possible."},
-                {"role": "user", "content": message}
-            ]
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"Error calling Groq API: {e}")
-        return "Error processing your request via Groq. Check logs."
-
-def send_to_openclaw(message, sender_number):
-    """Send message to OpenClaw via /v1/chat/completions with main session routing."""
-    print(f"Attempting to send message to OpenClaw: {message}")
-    target_url = f"{OPENCLAW_GATEWAY_URL}/v1/chat/completions"
-
-    if not OPENCLAW_GATEWAY_TOKEN:
-        print("OPENCLAW_GATEWAY_TOKEN not configured. Cannot send to OpenClaw.")
-        return None
-
+    target_url = f"{final_gateway_url.rstrip('/')}/api/v1/sessions_send"
     headers = {
-        "Authorization": f"Bearer {OPENCLAW_GATEWAY_TOKEN}",
-        "Content-Type": "application/json",
-        "x-openclaw-session-key": "main"
+        "Authorization": f"Bearer {final_token}",
+        "Content-Type": "application/json"
     }
     payload = {
-        "model": "openclaw/default",
-        "messages": [
-            {"role": "system", "content": "You are responding via SMS text message. Be extremely brief — 1-2 sentences max, under 300 characters total. No formatting, no markdown, no bullet points. Plain text only."},
-            {"role": "user", "content": message}
-        ],
-        "user": "chris-sms"
+        "message": message_text,
+        "agentId": "main" # Assuming the main agent should handle this
     }
 
+    print(f"Sending to OpenClaw: {target_url}")
     try:
-        response = requests.post(target_url, headers=headers, json=payload, timeout=120)
-        response.raise_for_status()
-        response_data = response.json()
-        openclaw_reply = response_data.get("choices", [{}])[0].get("message", {}).get("content", "No reply from OpenClaw.")
-        # Hard cap at 480 chars (3 SMS max) to prevent text floods
-        if len(openclaw_reply) > 480:
-            openclaw_reply = openclaw_reply[:477] + "..."
-        print(f"Received reply from OpenClaw: {openclaw_reply}")
-        return openclaw_reply
-    except requests.exceptions.Timeout:
-        print("OpenClaw request timed out.")
-        return "OpenClaw is taking too long to respond. Try again later."
+        response = requests.post(target_url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()  # Raise an HTTPError for bad responses (4xx or 5xx)
+        print(f"OpenClaw response status: {response.status_code}")
+        print(f"OpenClaw response: {response.json()}")
+        return response.json().get('message', 'OpenClaw response received.')
     except requests.exceptions.RequestException as e:
         print(f"Error sending to OpenClaw: {e}")
-        return f"OpenClaw communication error. ({e})"
-    except (json.JSONDecodeError, IndexError, KeyError) as e:
-        print(f"OpenClaw response parse error: {e} — raw: {response.text}")
-        return "OpenClaw sent an unreadable response."
+        return f"Error communicating with OpenClaw Gateway: {e}"
 
-def add_task(task_name):
-    if not NOTION_TOKEN or not NOTION_DB_ID:
-        return {"error": "Notion not configured."}
-    data = {
-        "parent": {"database_id": NOTION_DB_ID},
-        "properties": {
-            "Name": {"title": [{"text": {"content": task_name}}]},
-            "Status": {"select": {"name": "To Check Out"}}
-        }
+
+def ask_groq(prompt):
+    # Groq API integration (fallback if OpenClaw is not used for some reason)
+    groq_api_url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "model": "mixtral-8x7b-32768"  # Or another suitable model
     }
     try:
-        r = requests.post("https://api.notion.com/v1/pages", headers=notion_headers(), json=data)
-        r.raise_for_status()
-        return r.json()
+        response = requests.post(groq_api_url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
     except requests.exceptions.RequestException as e:
-        print(f"Error adding Notion task: {e}")
-        return {"error": f"Failed to add Notion task: {e}"}
+        print(f"Error asking Groq: {e}")
+        return "Error communicating with AI."
 
-def add_reminder(task_name, due_date_str):
-    if not NOTION_TOKEN or not NOTION_DB_ID:
-        return {"error": "Notion not configured."}
-    props = {
-        "Name": {"title": [{"text": {"content": task_name}}]},
-        "Status": {"select": {"name": "To Check Out"}},
-        "Notes": {"rich_text": [{"text": {"content": "Reminder"}}]},
-        "Type": {"select": {"name": "Idea"}},
-    }
-    if due_date_str:
-        props["Added"] = {"date": {"start": due_date_str}}
-    data = {"parent": {"database_id": NOTION_DB_ID}, "properties": props}
-    try:
-        r = requests.post("https://api.notion.com/v1/pages", headers=notion_headers(), json=data)
-        r.raise_for_status()
-        return r.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error adding Notion reminder: {e}")
-        return {"error": f"Failed to add Notion reminder: {e}"}
+def get_light_state_internal(light_name, api_type):
+    # This function would query the state of a light. Implemented later.
+    # For now, it returns a dummy state.
+    return {"name": light_name, "state": "unknown", "bri": 0, "hue": 0, "sat": 0}
 
-def get_reminders():
-    if not NOTION_TOKEN or not NOTION_DB_ID:
-        return []
-    data = {
-        "filter": {
-            "property": "Notes",
-            "rich_text": {"contains": "Reminder"}
-        },
-        "sorts": [{"property": "Added", "direction": "ascending"}],
-        "page_size": 10
-    }
-    try:
-        r = requests.post(
-            f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query",
-            headers=notion_headers(),
-            json=data
-        )
-        r.raise_for_status()
-        results = r.json().get("results", [])
-        reminders = []
-        for page in results:
-            props = page.get("properties", {})
-            title = props.get("Name", {}).get("title", [])
-            name = title[0]["text"]["content"] if title else "Untitled"
-            due = props.get("Added", {}).get("date")
-            due_str = due["start"] if due else "No date"
-            reminders.append(f"{name} ({due_str})")
-        return reminders
-    except requests.exceptions.RequestException as e:
-        print(f"Error getting Notion reminders: {e}")
-        return []
-
-def parse_due_date(text):
-    """Try to extract a date from natural language using Groq."""
-    if not GROQ_API_KEY:
-        print("Groq API key not configured for date parsing.")
-        return None
-    try:
-        today = datetime.now().strftime("%Y-%m-%d")
-        prompt = f"Today is {today}. Extract the date and time from this text and return ONLY an ISO 8601 datetime string (YYYY-MM-DDTHH:MM:SS) or date (YYYY-MM-DD). If no date found, return NONE. Text: {text}"
-        response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        result = response.choices[0].message.content.strip()
-        if result == "NONE" or not re.match(r'^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?$', result):
-            return None
-        return result
-    except Exception as e:
-        print(f"Error parsing date with Groq: {e}")
-        return None
-
-@app.route("/sms", methods=["GET", "POST"])
-def receive_sms():
-    print("=== INCOMING REQUEST ===")
-    print(f"Method: {request.method}")
-    print(f"Data: {request.get_data()}")
-    print("========================")
-
+# --- Flask Routes --- #
+@app.route('/sms', methods=['POST'])
+def sms_reply():
     from_number = None
     message = None
 
@@ -248,89 +115,47 @@ def receive_sms():
         message = request.args.get("message")
 
     if not from_number or not message:
-        print("Missing 'from' or 'message' parameters in request.")
-        return "Missing params", 400
+        print(f"Missing params: from_number={from_number}, message={message}")
+        return jsonify({"status": "error", "message": "Missing params"}), 400
 
-    clean_from = from_number.replace("-", "").replace(" ", "")
-    if clean_from.startswith("+"):
-        clean_from = clean_from[1:]
-    if len(clean_from) == 11 and clean_from.startswith("1"):
-        clean_from = clean_from[1:]
+    message_lower = message.lower()
+    response_text = ""
 
-    clean_auth = ""
-    if AUTHORIZED_NUMBER:
-        clean_auth = AUTHORIZED_NUMBER.replace("-", "").replace(" ", "")
-        if clean_auth.startswith("+"):
-            clean_auth = clean_auth[1:]
-        if len(clean_auth) == 11 and clean_auth.startswith("1"):
-            clean_auth = clean_auth[1:]
+    print(f"Received SMS from {from_number}: {message}")
 
-    print(f"Cleaned from_number: {clean_from}, Authorized number: {clean_auth}")
+    if message_lower == "sexy":
+        print("Executing sexy command...")
+        # Define lights and actions for the \"sexy\" command
+        hue_lights = [
+            {"name": "TV Room Lamp", "bri": 254, "hue": 0, "sat": 254}, # Red
+            {"name": "Chris\' nightstand", "bri": 254, "hue": 0, "sat": 254}, # Red
+            {"name": "Jana\'s nightstand", "bri": 254, "hue": 0, "sat": 254} # Red
+        ]
 
-    if clean_auth and clean_from != clean_auth:
-        print(f"Unauthorized access attempt from {from_number}")
-        return "Unauthorized", 403
+        for light in hue_lights:
+            # Construct the OpenClaw command for Hue lights
+            command = f"openhue set light \"{light[\"name\"]}\" --on " \
+                      f"--bri {light[\"bri\"]} --hue {light[\"hue\"]} --sat {light[\"sat\"]}"
+            print(f"Sending to OpenClaw: {command}")
+            oc_response = send_to_openclaw(command)
+            print(f"OpenClaw response for {light[\"name\"]}: {oc_response}")
+            time.sleep(1) # Delay to respect Hue rate limits
 
-    msg = message.strip()
-    msg_lower = msg.lower()
-    reply = ""
-
-    if msg_lower.startswith("add task "):
-        task_name = msg[9:].strip()
-        add_task(task_name)
-        reply = f"Task added to Notion: {task_name}"
-
-    elif msg_lower.startswith("remind me "):
-        reminder_text = msg[10:].strip()
-        due_date = parse_due_date(reminder_text)
-        task_name = re.sub(r'^\b(at|on|by)\b.*$', '', reminder_text, flags=re.IGNORECASE).strip()
-        if not task_name:
-            task_name = reminder_text
-        add_reminder(task_name, due_date)
-        date_info = f" (due {due_date})" if due_date else ""
-        reply = f"Reminder set in Notion: {task_name}{date_info}"
-
-    elif msg_lower in ["reminders", "my reminders", "list reminders"]:
-        items = get_reminders()
-        if items:
-            reply = "Notion Reminders:\n" + "\n".join(items[:5])
-        else:
-            reply = "No Notion reminders found."
-
-    # Command: "sexy" mode - Turn TV Room Lamp, Chris' nightstand, and Jana's nightstand red at 100%
-    elif msg_lower == "sexy":
-        lights_to_control = [ "TV Room Lamp", "Chris' nightstand", "Jana's nightstand" ]
-        results = []
-        for light_name in lights_to_control:
-            # Turn on the light
-            openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --on", clean_from)
-            if openclaw_reply and "Error" in openclaw_reply:
-                results.append(f"Error turning on {light_name}: {openclaw_reply}")
-            time.sleep(1) # Small delay
-
-            # Set brightness to 100%
-            openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --brightness 100", clean_from)
-            if openclaw_reply and "Error" in openclaw_reply:
-                results.append(f"Error setting brightness for {light_name}: {openclaw_reply}")
-            time.sleep(1) # Small delay
-
-            # Set color to red
-            openclaw_reply = send_to_openclaw(f"openhue set light \"{light_name}\" --color red", clean_from)
-            if openclaw_reply and "Error" in openclaw_reply:
-                results.append(f"Error setting color for {light_name}: {openclaw_reply}")
-            time.sleep(1) # Small delay (after each light is done)
-        
-        if results:
-            reply = "Sexy mode executed with errors: " + "; ".join(results)
-        else:
-            reply = "Sexy mode activated for TV Room Lamp, Chris\' nightstand, and Jana\'s nightstand!"
-
+        response_text = "Executing sexy lighting sequence."
     else:
-        openclaw_reply = send_to_openclaw(msg, clean_from)
-        if openclaw_reply:
-            reply = openclaw_reply
-        else:
-            if GROQ_API_KEY:
-                reply = ask_groq(msg)
-            else:
-                reply = "OpenClaw not reachable and Groq API key is missing. Cannot process request."
+        # Fallback to OpenClaw for other commands
+        oc_response = send_to_openclaw(f"SMS from {from_number}: {message}")
+        response_text = oc_response if oc_response else f"Received your message: {message}"
+
+    resp = jsonify({"status": "success", "message": response_text})
+    # Add VoIP.ms specific headers if needed, for now just return JSON
+    return resp
+
+@app.route('/status', methods=['GET'])
+def status_check():
+    return jsonify({"status": "running", "message": "VoIP.ms Bot is operational"})
+
+
+# Main entry point for local development/testing
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)

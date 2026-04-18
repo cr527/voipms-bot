@@ -1,4 +1,5 @@
-flask
-gunicorn
+Flask
 requests
+python-dotenv
 groq
+Flask-Cors
