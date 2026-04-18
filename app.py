@@ -15,7 +15,7 @@ OPENCLAW_GATEWAY_TOKEN = os.environ.get('OPENCLAW_GATEWAY_TOKEN', 'your_token_he
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY', 'your_groq_api_key_here')
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://192.168.4.57:8000"}}}) # Enable CORS for your local UI
+CORS(app, resources={r"/*": {"origins": "http://192.168.4.57:8000"}}) # Enable CORS for your local UI
 
 # --- Helper Functions --- #
 def send_to_openclaw(message_text, token=None, gateway_url=None):
