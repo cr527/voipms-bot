@@ -117,38 +117,6 @@ def send_to_openclaw(message, sender_number):
         print(f"OpenClaw response parse error: {e} — raw: {response.text}")
         return "OpenClaw sent an unreadable response."
 
-def notion_headers():
-    return {
-        "Authorization": f"Bearer {NOTION_TOKEN}",
-        "Content-Type": "application/json",
-        "Notion-Version": "2022-06-28"
-    }
-
-def get_light_state(light_name, sender_number):
-    print(f"Attempting to get state for light: {light_name}")
-    # Use send_to_openclaw to execute openhue get light command
-    openclaw_response = send_to_openclaw(f"openhue get light \"{light_name}\" --json", sender_number)
-
-    if not openclaw_response or "Error" in openclaw_response:
-        print(f"Error getting light state for {light_name}: {openclaw_response}")
-        return None
-
-    try:
-        # Assuming openclaw_response is a JSON string from openhue CLI
-        light_data = json.loads(openclaw_response)
-        state = {
-            "on": light_data.get("on"),
-            "brightness": light_data.get("brightness"),
-            "hue": light_data.get("hue"),
-            "saturation": light_data.get("saturation"),
-            "xY": light_data.get("xY"),
-            "color": light_data.get("color") # openhue might return a readable color name
-        }
-        return state
-    except json.JSONDecodeError as e:
-        print(f"Failed to parse JSON for light state: {e} - Response: {openclaw_response}")
-        return None
-
 def add_task(task_name):
     if not NOTION_TOKEN or not NOTION_DB_ID:
         return {"error": "Notion not configured."}
@@ -354,28 +322,12 @@ def receive_sms():
         else:
             reply = "Sexy mode activated for TV Room Lamp, Chris\' nightstand, and Jana\'s nightstand!"
 
-    # Command to internally get light state (not for direct SMS use)
-    elif msg_lower.startswith("get_light_state_internal "):
-        light_name = msg[len("get_light_state_internal "):].strip()
-        state = get_light_state(light_name, clean_from)
-        if state:
-            return json.dumps(state), 200 # Return JSON string of light state directly
-        else:
-            return "Error getting light state.", 500
-
-    print(f"Final Reply: {reply}")
-
-    if reply and reply.strip() != "":
-        send_sms(clean_from, reply)
     else:
-        print("No reply to send via SMS.")
-
-    return "OK", 200
-
-@app.route("/")
-def index():
-    return "VoIP.ms SMS Bot is running.", 200
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+        openclaw_reply = send_to_openclaw(msg, clean_from)
+        if openclaw_reply:
+            reply = openclaw_reply
+        else:
+            if GROQ_API_KEY:
+                reply = ask_groq(msg)
+            else:
+                reply = "OpenClaw not reachable and Groq API key is missing. Cannot process request."
