@@ -126,7 +126,7 @@ def sms_reply():
     if message_lower == "sexy":
         print("Executing sexy command...")
         # Define lights and actions for the "sexy" command
-        # Dummy comment to force a Render redeploy - please ignore
+        # Dummy comment to force a Render redeploy - please ignore - Fix 2
         hue_lights = [
             {"name": "TV Room Lamp", "bri": 254, "hue": 0, "sat": 254}, # Red
             {"name": "Chris\' nightstand", "bri": 254, "hue": 0, "sat": 254}, # Red
