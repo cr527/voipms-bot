@@ -217,32 +217,35 @@ def receive_sms():
     from_number = None
     message = None
 
+    # Try to parse as JSON first
     json_data = request.get_json(silent=True)
     if json_data:
-        try:
-            if "data" in json_data and "payload" in json_data["data"]:
-                payload = json_data["data"]["payload"]
-                from_number = payload.get("from", {}).get("phone_number")
-                message = payload.get("text")
-            elif json_data.get("event") == "sms":
-                from_number = json_data.get("from_number")
-                message = json_data.get("message")
-            elif json_data.get("type") == "sms" or json_data.get("type") == "sms_mo":
-                from_number = json_data.get("from")
-                message = json_data.get("message")
+        print(f"Parsed JSON data: {json_data}")
+        if "from" in json_data:
+            from_number = json_data["from"]
+        if "message" in json_data:
+            message = json_data["message"]
+        elif "data" in json_data and "payload" in json_data["data"]:
+            payload = json_data["data"]["payload"]
+            from_number = payload.get("from", {}).get("phone_number")
+            message = payload.get("text")
+        elif json_data.get("event") == "sms":
+            from_number = json_data.get("from_number")
+            message = json_data.get("message")
+        elif json_data.get("type") == "sms" or json_data.get("type") == "sms_mo":
+            from_number = json_data.get("from")
+            message = json_data.get("message")
 
-            if not from_number and "from" in json_data:
-                from_number = json_data.get("from")
-            if not message and "message" in json_data:
-                message = json_data.get("message")
-
-        except Exception as e:
-            print(f"JSON parse error: {e}")
+    # If not found in JSON, try form data or query parameters
+    if not from_number:
+        from_number = request.form.get("from")
+    if not message:
+        message = request.form.get("message")
 
     if not from_number:
-        from_number = request.args.get("from") or request.form.get("from")
+        from_number = request.args.get("from")
     if not message:
-        message = request.args.get("message") or request.form.get("message")
+        message = request.args.get("message")
 
     if not from_number or not message:
         print("Missing 'from' or 'message' parameters in request.")
